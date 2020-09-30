@@ -48,9 +48,10 @@ def log_success(output):
 	# print("\033[92m" + output + "\033[0m")
 
 class Transmission(object):
-	def __init__(self, start, end):
+	def __init__(self, start, end, airtime):
 		self.start = start
 		self.end = end
+		self.airtime = airtime
 		self.collided = False
 
 class Channel(object):
@@ -64,8 +65,7 @@ class Channel(object):
 		for process in self.sensing_processes:
 			if process.is_alive:
 				process.interrupt()
-
-	def free(self, transmission):
+		yield self.env.timeout(transmission.airtime)
 		self.ongoing_transmisions.remove(transmission)
 
 	def check_collision(self, transmission):
@@ -94,12 +94,10 @@ class Ue(object):
 		self.cw = CW_MIN  # current contention window size
 		self.N = None  # backoff counter
 
-	def transmit(self, transmission, time):
+	def transmit(self, transmission):
 		"""Start occupying the channel for the transmission's duration and check for collison"""
-		log("{:.2f}:\t {} is now occupying the channel for the next {:.2f}".format(self.env.now, self.id, time))
-		self.channel.occupy(transmission)
-		yield self.env.timeout(time)
-		self.channel.free(transmission)
+		log("{:.2f}:\t {} is now occupying the channel for the next {:.2f}".format(self.env.now, self.id, transmission.airtime))
+		yield self.env.process(self.channel.occupy(transmission))
 		log("{:.2f}:\t {} frees the channel".format(self.env.now, self.id))
 		self.channel.check_collision(transmission)
 
@@ -167,8 +165,8 @@ class Ue(object):
 					log("{:.2f}:\t {} backoff is frozen".format(self.env.now, self.id))
 
 			trans_time = random.expovariate(1.0 / TRANSMITION_TIME) * 10e6 # TODO take MCOT into account
-			transmission = Transmission(self.env.now, self.env.now + trans_time)
-			yield self.env.process(self.transmit(transmission, trans_time))
+			transmission = Transmission(self.env.now, self.env.now + trans_time, trans_time)
+			yield self.env.process(self.transmit(transmission))
 			if not transmission.collided:
 				self.cw = CW_MIN
 				log_success("{:.2f}:\t {} transmission was successful. Current CW={}".format(self.env.now, self.id, self.cw))
