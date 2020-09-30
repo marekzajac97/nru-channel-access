@@ -4,7 +4,7 @@ import simpy
 
 RANDOM_SEED = 42
 TRANSMITION_TIME = 8					# Mean tranmission time in miliseconds
-SIM_TIME = 1							# Simulation time in seconds
+SIM_TIME = 100							# Simulation time in seconds
 GNB_NUMBER = 2							# Number of gNBs/nodes
 
 DETER_PERIOD = 16						# Time which a node is required to wait at the start of prioritization period (16 us)
@@ -153,11 +153,13 @@ class Gnb(object):
 			
 			self.N = random.randint(0, self.cw)  # draw a random backoff
 			log("{:.2f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
-			while self.N > 0:
+			while True:
 				yield self.env.process(self.wait_prioritization_period())
 				log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id, self.N))
 				yield self.env.process(self.wait_random_backoff())
-				if self.N != 0:
+				if self.N == 0:
+					break
+				else:
 					log("{:.2f}:\t {} backoff is frozen".format(self.env.now, self.id))
 
 			trans_time = random.expovariate(1.0 / TRANSMITION_TIME) * 10e3 # TODO take MCOT into account
