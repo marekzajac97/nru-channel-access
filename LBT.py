@@ -3,12 +3,12 @@ import simpy
 
 
 RANDOM_SEED = 42
-TRANSMITION_TIME = 8 	 # Mean tranmission time in miliseconds
-SIM_TIME = 100           # Simulation time in seconds
-GNB_NUMBER = 2           # Number of gNBs/nodes
+TRANSMITION_TIME = 8					# Mean tranmission time in miliseconds
+SIM_TIME = 1							# Simulation time in seconds
+GNB_NUMBER = 2							# Number of gNBs/nodes
 
-DETER_PERIOD = 16        # Time which a node is required to wait at the start of prioritization period (16 us)
-SLOT_DURATION = 9   	 # observation slot length in nanoseconds
+DETER_PERIOD = 16						# Time which a node is required to wait at the start of prioritization period (16 us)
+OBSERVATION_SLOT_DURATION = 9			# observation slot length in microseconds
 
 # Channel access class 1
 # M = 1 					 # fixed number of observation slots in prioritization period
@@ -110,10 +110,10 @@ class Gnb(object):
 			waiting_time = self.channel.time_until_free() # in case a new transmission started check again
 
 	def sense_channel(self, slots_to_wait):
-		"""Wait for the duration of slots_to_wait x SLOT_DURATION. Return remaining slots (0 if procedure was successful)"""
+		"""Wait for the duration of slots_to_wait x OBSERVATION_SLOT_DURATION. Return remaining slots (0 if procedure was successful)"""
 		try:
 			while slots_to_wait > 0:
-				yield self.env.timeout(SLOT_DURATION)
+				yield self.env.timeout(OBSERVATION_SLOT_DURATION)
 				slots_to_wait -= 1
 				log("{:.2f}:\t {} Channel idle for the duration of a single observation slot, remaining slots: {}".format(self.env.now, self.id, slots_to_wait))
 		except simpy.Interrupt:
@@ -121,7 +121,7 @@ class Gnb(object):
 		return slots_to_wait
 
 	def wait_prioritization_period(self):
-		"""Wait initial 16 us + m x SLOT_DURATION us"""
+		"""Wait initial 16 us + m x OBSERVATION_SLOT_DURATION us"""
 		m = M
 		while m > 0:  # if m == 0 continue to backoff
 			yield self.env.process(self.wait_for_idle_channel())
@@ -139,7 +139,7 @@ class Gnb(object):
 			self.channel.sensing_processes.remove(sensing_proc)
 	
 	def wait_random_backoff(self):
-		"""Wait random number of slots N x SLOT_DURATION us"""
+		"""Wait random number of slots N x OBSERVATION_SLOT_DURATION us"""
 		sensing_proc = self.env.process(self.sense_channel(self.N))
 		self.channel.sensing_processes.append(sensing_proc)
 		self.N = yield sensing_proc
@@ -160,7 +160,7 @@ class Gnb(object):
 				if self.N != 0:
 					log("{:.2f}:\t {} backoff is frozen".format(self.env.now, self.id))
 
-			trans_time = random.expovariate(1.0 / TRANSMITION_TIME) * 10e6 # TODO take MCOT into account
+			trans_time = random.expovariate(1.0 / TRANSMITION_TIME) * 10e3 # TODO take MCOT into account
 			transmission = Transmission(self.env.now, self.env.now + trans_time, trans_time)
 			yield self.env.process(self.transmit(transmission))
 			if not transmission.collided:
@@ -181,7 +181,7 @@ env = simpy.Environment()
 channel = Channel(env)
 gnbs = [Gnb(env, 'gNB {}'.format(i), channel) for i in range(GNB_NUMBER)]
 
-env.run(until=(SIM_TIME*10e9))
+env.run(until=(SIM_TIME*10e6))
 
 total_transmissions = 0
 successful_transmissions = 0
