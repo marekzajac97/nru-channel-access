@@ -5,7 +5,7 @@ import simpy
 RANDOM_SEED = 42
 TRANSMITION_TIME = 8 	 # Mean tranmission time in miliseconds
 SIM_TIME = 100           # Simulation time in seconds
-UE_NUMBER = 2            # Number of UEs/nodes
+GNB_NUMBER = 2           # Number of gNBs/nodes
 
 DETER_PERIOD = 16        # Time which a node is required to wait at the start of prioritization period (16 us)
 SLOT_DURATION = 9   	 # observation slot length in nanoseconds
@@ -29,10 +29,6 @@ SLOT_DURATION = 9   	 # observation slot length in nanoseconds
 M = 7
 CW_MIN = 15
 CW_MAX = 1023
-
-
-TOTAL_ATTEMPTS = 0
-SUCCESSFUL_ATTEMPTS = 0
 
 
 def log(output):
@@ -86,13 +82,17 @@ class Channel(object):
 		return max_time
 
 
-class Ue(object):
+class Gnb(object):
 	def __init__(self, env, id, channel):
 		self.env = env
 		self.channel = channel
 		self.id = id
-		self.cw = CW_MIN  # current contention window size
-		self.N = None  # backoff counter
+		self.cw = CW_MIN			# current contention window size
+		self.N = None				# backoff counter
+		self.successful_trans = 0	# number of successful transmissions
+		self.total_trans = 0		# total number of transmissions
+
+		self.env.process(self.run())
 
 	def transmit(self, transmission):
 		"""Start occupying the channel for the transmission's duration and check for collison"""
@@ -148,15 +148,11 @@ class Ue(object):
 
 	def run(self):
 		"""Main process. Genrate new transmission, wait for channel to become idle and begin transmission"""
-		global TOTAL_ATTEMPTS
-		global SUCCESSFUL_ATTEMPTS
-
-		# yield self.env.timeout(random.expovariate(1.0 / INITIAL_DELAY))
 		while True:
 			log("{:.2f}:\t {} begins new transmisson procedure".format(self.env.now, self.id))
 			
 			self.N = random.randint(0, self.cw)  # draw a random backoff
-			log("{:.2f}:\t {} UE has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
+			log("{:.2f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
 			while self.N > 0:
 				yield self.env.process(self.wait_prioritization_period())
 				log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id, self.N))
@@ -170,24 +166,34 @@ class Ue(object):
 			if not transmission.collided:
 				self.cw = CW_MIN
 				log_success("{:.2f}:\t {} transmission was successful. Current CW={}".format(self.env.now, self.id, self.cw))
-				SUCCESSFUL_ATTEMPTS += 1
-				TOTAL_ATTEMPTS += 1
+				self.successful_trans += 1
+				self.total_trans += 1
 			else:
 				if self.cw < CW_MAX:
 					self.cw = ((self.cw + 1) * 2) - 1
 				log_fail("{:.2f}:\t {} transmission resulted in a collision. Current CW={}".format(self.env.now, self.id, self.cw))
-				TOTAL_ATTEMPTS += 1
+				self.total_trans += 1
 			
 
 random.seed(RANDOM_SEED)
 
 env = simpy.Environment()
 channel = Channel(env)
-
-for i in range(UE_NUMBER):
-	ue = Ue(env, 'UE {}'.format(i), channel)
-	env.process(ue.run())
+gnbs = [Gnb(env, 'gNB {}'.format(i), channel) for i in range(GNB_NUMBER)]
 
 env.run(until=(SIM_TIME*10e9))
-print('Total transmission attempts: {}'.format(TOTAL_ATTEMPTS))
-print('\nColission probablility: {:.2f}'.format(1 - (SUCCESSFUL_ATTEMPTS / TOTAL_ATTEMPTS)))
+
+total_transmissions = 0
+successful_transmissions = 0
+
+for gnb in gnbs:
+	print("------------------------------------")
+	print(gnb.id)
+	print('Collsions: {}/{} ({:.2f}%)'.format(gnb.total_trans - gnb.successful_trans,
+		                                      gnb.total_trans,
+		                                      (1 - gnb.successful_trans / gnb.total_trans) * 100))
+	total_transmissions += gnb.total_trans
+	successful_transmissions += gnb.successful_trans
+
+print('====================================')
+print('\nMean colission probablility: {:.4f}'.format(1 - (successful_transmissions / total_transmissions)))
