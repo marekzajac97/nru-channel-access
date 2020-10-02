@@ -3,7 +3,7 @@ import simpy
 
 
 RANDOM_SEED = 42
-SIM_TIME = 0.1							# Simulation time in seconds
+SIM_TIME = 100							# Simulation time in seconds
 GNB_NUMBER = 2							# Number of gNBs/nodes
 
 DETER_PERIOD = 16						# Time which a node is required to wait at the start of prioritization period (16 us)
@@ -35,7 +35,7 @@ CW_MAX = 1023
 MCOT = 8
 
 
-def log(output):
+def log(output, end='\n'):
 	pass
 	# if 'gNB 0' in output:
 	# 	print("\033[35m" + output + "\033[0m")
@@ -51,11 +51,12 @@ def log_success(output):
 	# print("\033[92m" + output + "\033[0m")
 
 class Transmission(object):
-	def __init__(self, start, end, airtime):
-		self.start = start
-		self.end = end
-		self.airtime = airtime
-		self.collided = False
+	def __init__(self, start, airtime, rs_time = 0):
+		self.start = start       					# transmission start (including RS)
+		self.end = start + rs_time + airtime		# transmission end
+		self.airtime = airtime   					# time spent on sending data
+		self.rs_time = rs_time   					# time spent on sending reservation signal before data
+		self.collided = False    					# true if transmission colided with another one
 
 class Channel(object):
 	def __init__(self, env):
@@ -63,20 +64,23 @@ class Channel(object):
 		self.sensing_processes = []
 		self.env = env
 
-	def occupy(self, transmission):
+	def transmit(self, transmission):
+		"""Occupy channel for the duration of reservation signal and transmission duration, check for collison at the end"""
 		self.ongoing_transmisions.append(transmission)
 		for process in self.sensing_processes:
 			if process.is_alive:
 				process.interrupt()
+		yield self.env.timeout(transmission.rs_time)
 		yield self.env.timeout(transmission.airtime)
+		self.check_collision(transmission)
 		self.ongoing_transmisions.remove(transmission)
 
 	def check_collision(self, transmission):
-		"""Check if a given transmission start/end times overlapped with any of the ongoing transmissions"""
+		"""Check if a given transmission start/end times overlapped with any of the ongoing transmissions. Take into account sending data only! (no RS)"""
 		for t in self.ongoing_transmisions:
-			if t.end > transmission.start and t.start < transmission.end:
-			 	transmission.collided = True
-			 	t.collided = True
+			if t.end > (transmission.start + transmission.rs_time) and (t.start + t.rs_time) < transmission.end and transmission is not t:
+				transmission.collided = True
+				t.collided = True
 
 	def time_until_free(self):
 		"""Return time left for the channel to become idle"""
@@ -99,6 +103,7 @@ class Gnb(object):
 		self.next_sync_slot_boundry = 0	# nex synchronization slot boundry
 		self.successful_trans = 0		# number of successful transmissions
 		self.total_trans = 0			# total number of transmissions
+		self.total_airtime = 0          # time spent on transmiting data
 
 		self.env.process(self.run())
 
@@ -108,13 +113,6 @@ class Gnb(object):
 			self.next_sync_slot_boundry += SYNCHRONIZATION_SLOT_DURATION
 			# log_fail("{:.2f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
 			yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
-
-	def transmit(self, transmission):
-		"""Start occupying the channel for the transmission's duration and check for collison"""
-		log("{:.2f}:\t {} is now occupying the channel for the next {:.2f}".format(self.env.now, self.id, transmission.airtime))
-		yield self.env.process(self.channel.occupy(transmission))
-		log("{:.2f}:\t {} frees the channel".format(self.env.now, self.id))
-		self.channel.check_collision(transmission)
 
 	def wait_for_idle_channel(self):
 		"""Wait until the channel is sensed idle"""
@@ -130,9 +128,9 @@ class Gnb(object):
 			while slots_to_wait > 0:
 				yield self.env.timeout(OBSERVATION_SLOT_DURATION)
 				slots_to_wait -= 1
-				log("{:.2f}:\t {} Channel idle for the duration of a single observation slot, remaining slots: {}".format(self.env.now, self.id, slots_to_wait))
+				# log("{:.2f}:\t {} Channel idle for the duration of a single observation slot, remaining slots: {}".format(self.env.now, self.id, slots_to_wait))
 		except simpy.Interrupt:
-			log("{:.2f}:\t {} Channel sensed busy during observation slot, remaining slots: {}".format(self.env.now, self.id, slots_to_wait))
+			pass  # if the procedure was interrupted by the start of a new transmission retrun remaining slots
 		return slots_to_wait
 
 	def wait_prioritization_period(self):
@@ -152,6 +150,8 @@ class Gnb(object):
 			self.channel.sensing_processes.append(sensing_proc)  # let the channel know that there is a process sensing it
 			m = yield sensing_proc
 			self.channel.sensing_processes.remove(sensing_proc)
+			if m != 0:
+				log("{:.2f}:\t {} Channel BUSY - prioritezation period failed.".format(self.env.now, self.id, slots_to_wait))
 	
 	def wait_random_backoff(self):
 		"""Wait random number of slots N x OBSERVATION_SLOT_DURATION us"""
@@ -168,22 +168,26 @@ class Gnb(object):
 			
 			self.N = random.randint(0, self.cw)  # draw a random backoff
 			log("{:.2f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
-			while self.N > 0:
+			while True:
 				yield self.env.process(self.wait_prioritization_period())
 				log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id, self.N))
 				yield self.env.process(self.wait_random_backoff())
-				if self.N != 0:
-					log("{:.2f}:\t {} backoff is frozen".format(self.env.now, self.id))
+				if self.N == 0:
+					break
+				else:
+					log("{:.2f}:\t {} Channel BUSY - backoff is frozen. Remaining slots: {}".format(self.env.now, self.id, self.N))
 
-			# reserve channel while waiting for the next sync slot boundry
-			time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now
-			log("{:.2f}:\t {} transmiting reservation signal while waiting for a new slot boundry for the next {:.2f}".format(self.env.now, self.id, time_to_next_sync_slot))
-			reservation_signal = Transmission(self.env.now, self.env.now + time_to_next_sync_slot, time_to_next_sync_slot)
-			yield self.env.process(self.channel.occupy(reservation_signal))
-
-			trans_time = (MCOT * 1e3 - time_to_next_sync_slot) # substract time taken for transmiting reservation signal to fulfill MCOT constraint
-			transmission = Transmission(self.env.now, self.env.now + trans_time, trans_time)
-			yield self.env.process(self.transmit(transmission))
+			time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal / gap
+			time_to_next_sync_slot = 0
+			trans_time = (MCOT * 1e3 - time_to_next_sync_slot) # use the rest of MCOT to transmit data
+			self.total_airtime += trans_time
+			transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
+			log("{:.2f}:\t {} is now occupying the channel for the next {:.2f} (RS={:.2f})".format(self.env.now,
+																					   self.id,
+																					   transmission.end - transmission.start,
+																					   transmission.rs_time))
+			yield self.env.process(self.channel.transmit(transmission))
+			log("{:.2f}:\t {} frees the channel".format(self.env.now, self.id))
 			if not transmission.collided:
 				self.cw = CW_MIN
 				log_success("{:.2f}:\t {} transmission was successful. Current CW={}".format(self.env.now, self.id, self.cw))
