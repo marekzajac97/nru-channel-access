@@ -1,11 +1,12 @@
 import random
 import simpy
 
+DEBUG = False
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
-DEBUG = False
+RS_SIGNALS = True                     # if True use reservation signals before transmission. Use gap otherwise
 
 # Channel access class 1
 # M = 1                               # fixed number of observation slots in prioritization period
@@ -170,7 +171,7 @@ class Gnb(object):
             log("{:.2f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
             while True:
                 yield self.env.process(self.wait_prioritization_period())
-                log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id, self.N))
+                log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id))
                 yield self.env.process(self.wait_random_backoff())
                 if self.N == 0:
                     break
@@ -178,7 +179,7 @@ class Gnb(object):
                     log("{:.2f}:\t {} Channel BUSY - backoff is frozen. Remaining slots: {}".format(self.env.now, self.id, self.N))
 
             time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal / gap
-            trans_time = (MCOT * 1e3 - time_to_next_sync_slot) # use the rest of MCOT to transmit data
+            trans_time = (MCOT * 1e3 - time_to_next_sync_slot)  # use the rest of MCOT to transmit data
             self.total_airtime += trans_time
             transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
             log("{:.2f}:\t {} is now occupying the channel for the next {:.2f} (RS={:.2f})".format(self.env.now,
@@ -209,7 +210,7 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
 
     env.run(until=(sim_time*1e6))
 
-    results = list() 
+    results = list()
     for gnb in gnbs:
         results.append({'gnb_id': gnb.id,
                         'successful_transmissions': gnb.successful_trans,
