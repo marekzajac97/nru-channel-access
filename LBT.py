@@ -2,15 +2,15 @@ import random
 import simpy
 
 
-DETER_PERIOD = 16                       # Time which a node is required to wait at the start of prioritization period (16 us)
-OBSERVATION_SLOT_DURATION = 9           # observation slot length in microseconds
-SYNCHRONIZATION_SLOT_DURATION = 1000    # synchronization slot length in microseconds
+DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
+OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
+SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 DEBUG = False
 
 # Channel access class 1
-# M = 1                      # fixed number of observation slots in prioritization period
-# CW_MIN = 3                 # minimum contention window size
-# CW_MAX = 7                 # maximum
+# M = 1                               # fixed number of observation slots in prioritization period
+# CW_MIN = 3                          # minimum contention window size
+# CW_MAX = 7                          # maximum
 # MCOT = 2
 
 # Channel access class 2
@@ -44,18 +44,20 @@ def log_fail(output):
     if DEBUG:
         print("\033[91m" + output + "\033[0m")
 
+
 def log_success(output):
     if DEBUG:
         print("\033[92m" + output + "\033[0m")
 
 
 class Transmission(object):
-    def __init__(self, start, airtime, rs_time = 0):
+    def __init__(self, start, airtime, rs_time=0):
         self.start = start                          # transmission start (including RS)
         self.end = start + rs_time + airtime        # transmission end
         self.airtime = airtime                      # time spent on sending data
         self.rs_time = rs_time                      # time spent on sending reservation signal before data
         self.collided = False                       # true if transmission colided with another one
+
 
 class Channel(object):
     def __init__(self, env):
@@ -75,9 +77,10 @@ class Channel(object):
         self.ongoing_transmisions.remove(transmission)
 
     def check_collision(self, transmission):
-        """Check if a given transmission start/end times overlapped with any of the ongoing transmissions. Take into account sending data only! (no RS)"""
+        """Check if a given data transmission start/end times overlapped with any of the ongoing transmissions"""
         for t in self.ongoing_transmisions:
-            if t.end > (transmission.start + transmission.rs_time) and (t.start + t.rs_time) < transmission.end and transmission is not t:
+            if (t.end > (transmission.start + transmission.rs_time) and
+                    (t.start + t.rs_time) < transmission.end and transmission is not t):
                 transmission.collided = True
                 t.collided = True
 
@@ -85,7 +88,6 @@ class Channel(object):
         """Return time left for the channel to become idle"""
         max_time = 0
         for t in self.ongoing_transmisions:
-            # if self.env.now != t.start:  # don't count transmissions which had just started (workaround for case when a few nodes begin transmission at the same time. One will always start before the others :/)
             time_left = t.end - self.env.now
             if time_left > max_time:
                 max_time = time_left
@@ -97,12 +99,12 @@ class Gnb(object):
         self.env = env
         self.channel = channel
         self.id = id
-        self.cw = CW_MIN                # current contention window size
-        self.N = None                   # backoff counter
-        self.next_sync_slot_boundry = 0 # nex synchronization slot boundry
-        self.successful_trans = 0       # number of successful transmissions
-        self.total_trans = 0            # total number of transmissions
-        self.total_airtime = 0          # time spent on transmiting data
+        self.cw = CW_MIN                 # current contention window size
+        self.N = None                    # backoff counter
+        self.next_sync_slot_boundry = 0  # nex synchronization slot boundry
+        self.successful_trans = 0        # number of successful transmissions
+        self.total_trans = 0             # total number of transmissions
+        self.total_airtime = 0           # time spent on transmiting data
 
         self.env.process(self.run())
 
@@ -119,7 +121,7 @@ class Gnb(object):
         while waiting_time != 0:
             log("{:.2f}:\t {} is sensing channel busy (for at least {:.2f})".format(self.env.now, self.id, waiting_time))
             yield self.env.timeout(waiting_time)
-            waiting_time = self.channel.time_until_free() # in case a new transmission started check again
+            waiting_time = self.channel.time_until_free()  # in case a new transmission started check again
 
     def sense_channel(self, slots_to_wait):
         """Wait for the duration of slots_to_wait x OBSERVATION_SLOT_DURATION. Return remaining slots (0 if procedure was successful)"""
@@ -127,7 +129,6 @@ class Gnb(object):
             while slots_to_wait > 0:
                 yield self.env.timeout(OBSERVATION_SLOT_DURATION)
                 slots_to_wait -= 1
-                # log("{:.2f}:\t {} Channel idle for the duration of a single observation slot, remaining slots: {}".format(self.env.now, self.id, slots_to_wait))
         except simpy.Interrupt:
             pass  # if the procedure was interrupted by the start of a new transmission retrun remaining slots
         return slots_to_wait
@@ -150,8 +151,8 @@ class Gnb(object):
             m = yield sensing_proc
             self.channel.sensing_processes.remove(sensing_proc)
             if m != 0:
-                log("{:.2f}:\t {} Channel BUSY - prioritezation period failed.".format(self.env.now, self.id, slots_to_wait))
-    
+                log("{:.2f}:\t {} Channel BUSY - prioritezation period failed.".format(self.env.now, self.id))
+
     def wait_random_backoff(self):
         """Wait random number of slots N x OBSERVATION_SLOT_DURATION us"""
         sensing_proc = self.env.process(self.sense_channel(self.N))
@@ -164,7 +165,7 @@ class Gnb(object):
         self.env.process(self.sync_slot_counter())
         while True:
             log("{:.2f}:\t {} begins new transmisson procedure".format(self.env.now, self.id))
-            
+
             self.N = random.randint(0, self.cw)  # draw a random backoff
             log("{:.2f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
             while True:
@@ -181,9 +182,9 @@ class Gnb(object):
             self.total_airtime += trans_time
             transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
             log("{:.2f}:\t {} is now occupying the channel for the next {:.2f} (RS={:.2f})".format(self.env.now,
-                                                                                       self.id,
-                                                                                       transmission.end - transmission.start,
-                                                                                       transmission.rs_time))
+                                                                                                   self.id,
+                                                                                                   transmission.end - transmission.start,
+                                                                                                   transmission.rs_time))
             yield self.env.process(self.channel.transmit(transmission))
             log("{:.2f}:\t {} frees the channel".format(self.env.now, self.id))
             if not transmission.collided:
@@ -236,7 +237,7 @@ if __name__ == "__main__":
         print('Collsions: {}/{} ({:.2f}%)'.format(result['failed_transmissions'],
                                                   result['total_transmissions'],
                                                   result['collision_probability'] * 100))
-        print('Total airtime: {} ms'.format(result['airtime'] / 1e3))
+        print('Total channel occupancy time: {} ms'.format(result['airtime'] / 1e3))
         print('Normalized airtime: {:.2f}'.format(result['airtime'] / total_airtime))
 
     print('====================================')
