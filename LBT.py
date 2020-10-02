@@ -2,13 +2,10 @@ import random
 import simpy
 
 
-RANDOM_SEED = 42
-SIM_TIME = 100							# Simulation time in seconds
-GNB_NUMBER = 2							# Number of gNBs/nodes
-
 DETER_PERIOD = 16						# Time which a node is required to wait at the start of prioritization period (16 us)
 OBSERVATION_SLOT_DURATION = 9			# observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000	# synchronization slot length in microseconds
+DEBUG = False
 
 # Channel access class 1
 # M = 1 					 # fixed number of observation slots in prioritization period
@@ -35,20 +32,22 @@ CW_MAX = 1023
 MCOT = 8
 
 
-def log(output, end='\n'):
-	pass
-	# if 'gNB 0' in output:
-	# 	print("\033[35m" + output + "\033[0m")
-	# else:
-	# 	print(output)
+def log(output):
+	if DEBUG:
+		if 'gNB 0' in output:
+			print("\033[35m" + output + "\033[0m")  # highlight one gNB
+		else:
+			print(output)
+
 
 def log_fail(output):
-	pass
-	# print("\033[91m" + output + "\033[0m")
+	if DEBUG:
+		print("\033[91m" + output + "\033[0m")
 
 def log_success(output):
-	pass
-	# print("\033[92m" + output + "\033[0m")
+	if DEBUG:
+		print("\033[92m" + output + "\033[0m")
+
 
 class Transmission(object):
 	def __init__(self, start, airtime, rs_time = 0):
@@ -60,8 +59,8 @@ class Transmission(object):
 
 class Channel(object):
 	def __init__(self, env):
-		self.ongoing_transmisions = []
-		self.sensing_processes = []
+		self.ongoing_transmisions = list()
+		self.sensing_processes = list()
 		self.env = env
 
 	def transmit(self, transmission):
@@ -178,7 +177,6 @@ class Gnb(object):
 					log("{:.2f}:\t {} Channel BUSY - backoff is frozen. Remaining slots: {}".format(self.env.now, self.id, self.N))
 
 			time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal / gap
-			time_to_next_sync_slot = 0
 			trans_time = (MCOT * 1e3 - time_to_next_sync_slot) # use the rest of MCOT to transmit data
 			self.total_airtime += trans_time
 			transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
@@ -198,27 +196,40 @@ class Gnb(object):
 					self.cw = ((self.cw + 1) * 2) - 1
 				log_fail("{:.2f}:\t {} transmission resulted in a collision. Current CW={}".format(self.env.now, self.id, self.cw))
 				self.total_trans += 1
-			
 
-random.seed(RANDOM_SEED)
 
-env = simpy.Environment()
-channel = Channel(env)
-gnbs = [Gnb(env, 'gNB {}'.format(i), channel) for i in range(GNB_NUMBER)]
+def run_simulation(sim_time, nr_of_gnbs, seed):
+	"""Run simulation. Return a list with results."""
+	random.seed(seed)
 
-env.run(until=(SIM_TIME*1e6))
+	env = simpy.Environment()
+	channel = Channel(env)
+	gnbs = [Gnb(env, 'gNB {}'.format(i), channel) for i in range(nr_of_gnbs)]
 
-total_transmissions = 0
-successful_transmissions = 0
+	env.run(until=(sim_time*1e6))
 
-for gnb in gnbs:
-	print("------------------------------------")
-	print(gnb.id)
-	print('Collsions: {}/{} ({:.2f}%)'.format(gnb.total_trans - gnb.successful_trans,
-		                                      gnb.total_trans,
-		                                      (1 - gnb.successful_trans / gnb.total_trans) * 100))
-	total_transmissions += gnb.total_trans
-	successful_transmissions += gnb.successful_trans
+	results = list() 
+	for gnb in gnbs:
+		results.append({'gnb_id': gnb.id,
+						'successful_transmissions': gnb.successful_trans,
+						'failed_transmissions': gnb.total_trans - gnb.successful_trans,
+						'total_transmissions': gnb.total_trans,
+						'collision_probability': 1 - gnb.successful_trans / gnb.total_trans})
+	return results
 
-print('====================================')
-print('\nMean colission probablility: {:.4f}'.format(1 - (successful_transmissions / total_transmissions)))
+
+if __name__ == "__main__":
+	total_t = 0
+	fail_t = 0
+	results = run_simulation(sim_time=100, nr_of_gnbs=2, seed=42)
+	for result in results:
+		print("------------------------------------")
+		print(result['gnb_id'])
+		print('Collsions: {}/{} ({:.2f}%)'.format(result['failed_transmissions'],
+			                                      result['total_transmissions'],
+			                                      result['collision_probability'] * 100))
+		total_t += result['total_transmissions']
+		fail_t += result['failed_transmissions']
+
+	print('====================================')
+	print('Total colission probablility: {:.4f}'.format(fail_t / total_t))
