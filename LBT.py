@@ -214,22 +214,30 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
                         'successful_transmissions': gnb.successful_trans,
                         'failed_transmissions': gnb.total_trans - gnb.successful_trans,
                         'total_transmissions': gnb.total_trans,
-                        'collision_probability': 1 - gnb.successful_trans / gnb.total_trans})
+                        'collision_probability': 1 - gnb.successful_trans / gnb.total_trans,
+                        'airtime': gnb.total_airtime})
     return results
 
 
 if __name__ == "__main__":
     total_t = 0
     fail_t = 0
-    results = run_simulation(sim_time=100, nr_of_gnbs=2, seed=42)
+    total_airtime = 0
+
+    results = run_simulation(sim_time=100, nr_of_gnbs=4, seed=42)
+
+    for result in results:
+        total_airtime += result['airtime']
+        total_t += result['total_transmissions']
+        fail_t += result['failed_transmissions']
     for result in results:
         print("------------------------------------")
         print(result['gnb_id'])
         print('Collsions: {}/{} ({:.2f}%)'.format(result['failed_transmissions'],
                                                   result['total_transmissions'],
                                                   result['collision_probability'] * 100))
-        total_t += result['total_transmissions']
-        fail_t += result['failed_transmissions']
+        print('Total airtime: {} ms'.format(result['airtime'] / 1e3))
+        print('Normalized airtime: {:.2f}'.format(result['airtime'] / total_airtime))
 
     print('====================================')
     print('Total colission probablility: {:.4f}'.format(fail_t / total_t))
