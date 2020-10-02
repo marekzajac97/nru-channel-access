@@ -1,11 +1,12 @@
 import random
 import simpy
 
-DEBUG = False
+DEBUG = True
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
+MAX_SYNC_SLOT_DESYNC = 500            # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
 RS_SIGNALS = True                     # if True use reservation signals before transmission. Use gap otherwise
 
 # Channel access class 1
@@ -111,9 +112,13 @@ class Gnb(object):
 
     def sync_slot_counter(self):
         """Process responsible for keeping the next sync slot boundry timestamp"""
+        desync = random.randint(0, MAX_SYNC_SLOT_DESYNC)
+        self.next_sync_slot_boundry = desync
+        yield self.env.timeout(desync)  # randomly desync tx starting points
+
         while True:
             self.next_sync_slot_boundry += SYNCHRONIZATION_SLOT_DURATION
-            # log_fail("{:.2f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
+            log_fail("{:.2f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
             yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
 
     def wait_for_idle_channel(self):
@@ -226,7 +231,7 @@ if __name__ == "__main__":
     fail_t = 0
     total_airtime = 0
 
-    results = run_simulation(sim_time=100, nr_of_gnbs=4, seed=42)
+    results = run_simulation(sim_time=0.1, nr_of_gnbs=4, seed=42)
 
     for result in results:
         total_airtime += result['airtime']
