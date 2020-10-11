@@ -1,12 +1,12 @@
 import random
 import simpy
 
-DEBUG = True
+DEBUG = False
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
-MAX_SYNC_SLOT_DESYNC = 500            # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
+MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
 RS_SIGNALS = True                     # if True use reservation signals before transmission. Use gap otherwise
 
 # Channel access class 1
@@ -159,6 +159,18 @@ class Gnb(object):
             if m != 0:
                 log("{:.2f}:\t {} Channel BUSY - prioritezation period failed.".format(self.env.now, self.id))
 
+    def wait_gap_period(self):
+        """Wait gap period"""
+        backoff_time = self.N * OBSERVATION_SLOT_DURATION  # time that will be taken for backoff
+        time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for gap
+
+        gap_length = time_to_next_sync_slot - backoff_time
+        while gap_length < 0:  # less than 0 means it's impossible to transmit in the next slot because backoff is too long
+            gap_length += SYNCHRONIZATION_SLOT_DURATION  # check if possible to transsmit in the slot after the next slot and repeat
+
+        log("{:.2f}:\t {} waiting the gap period ({:.2f})".format(self.env.now, self.id, gap_length))
+        yield self.env.timeout(gap_length)
+
     def wait_random_backoff(self):
         """Wait random number of slots N x OBSERVATION_SLOT_DURATION us"""
         sensing_proc = self.env.process(self.sense_channel(self.N))
@@ -177,16 +189,25 @@ class Gnb(object):
             while True:
                 yield self.env.process(self.wait_prioritization_period())
                 log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id))
+                if not RS_SIGNALS:  # if RS signals not used, use gap BEFORE backoff procedure
+                    yield self.env.process(self.wait_gap_period())
+                    if self.channel.time_until_free() > 0:  # if channel was occupied during the gap period, do not start backoff
+                        continue
+                log("{:.2f}:\t {} starting backoff procedure".format(self.env.now, self.id))
                 yield self.env.process(self.wait_random_backoff())
                 if self.N == 0:
                     break
                 else:
                     log("{:.2f}:\t {} Channel BUSY - backoff is frozen. Remaining slots: {}".format(self.env.now, self.id, self.N))
 
-            time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal / gap
-            trans_time = (MCOT * 1e3 - time_to_next_sync_slot)  # use the rest of MCOT to transmit data
+            if RS_SIGNALS:
+                time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal
+                trans_time = (MCOT * 1e3 - time_to_next_sync_slot)  # if RS in use = the rest of MCOT to transmit data
+                transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
+            else:
+                trans_time = MCOT * 1e3  # if gap in use = full MCOT to transmit data
+                transmission = Transmission(self.env.now, trans_time, 0)
             self.total_airtime += trans_time
-            transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
             log("{:.2f}:\t {} is now occupying the channel for the next {:.2f} (RS={:.2f})".format(self.env.now,
                                                                                                    self.id,
                                                                                                    transmission.end - transmission.start,
@@ -216,12 +237,13 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
     env.run(until=(sim_time*1e6))
 
     results = list()
+
     for gnb in gnbs:
         results.append({'gnb_id': gnb.id,
                         'successful_transmissions': gnb.successful_trans,
                         'failed_transmissions': gnb.total_trans - gnb.successful_trans,
                         'total_transmissions': gnb.total_trans,
-                        'collision_probability': 1 - gnb.successful_trans / gnb.total_trans,
+                        'collision_probability': 1 - gnb.successful_trans / gnb.total_trans if gnb.total_trans > 0 else None,
                         'airtime': gnb.total_airtime})
     return results
 
@@ -231,7 +253,7 @@ if __name__ == "__main__":
     fail_t = 0
     total_airtime = 0
 
-    results = run_simulation(sim_time=0.1, nr_of_gnbs=4, seed=42)
+    results = run_simulation(sim_time=100, nr_of_gnbs=2, seed=42)
 
     for result in results:
         total_airtime += result['airtime']
@@ -240,9 +262,9 @@ if __name__ == "__main__":
     for result in results:
         print("------------------------------------")
         print(result['gnb_id'])
-        print('Collsions: {}/{} ({:.2f}%)'.format(result['failed_transmissions'],
-                                                  result['total_transmissions'],
-                                                  result['collision_probability'] * 100))
+        print('Collsions: {}/{} ({}%)'.format(result['failed_transmissions'],
+                                              result['total_transmissions'],
+                                              result['collision_probability'] * 100 if result['collision_probability'] is not None else 'N/A'))
         print('Total channel occupancy time: {} ms'.format(result['airtime'] / 1e3))
         print('Normalized airtime: {:.2f}'.format(result['airtime'] / total_airtime))
 
