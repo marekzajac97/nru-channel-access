@@ -6,7 +6,7 @@ DEBUG = False
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
-MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
+MAX_SYNC_SLOT_DESYNC = 0              # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
 RS_SIGNALS = True                     # if True use reservation signals before transmission. Use gap otherwise
 
 # Channel access class 1
@@ -106,7 +106,8 @@ class Gnb(object):
         self.next_sync_slot_boundry = 0  # nex synchronization slot boundry
         self.successful_trans = 0        # number of successful transmissions
         self.total_trans = 0             # total number of transmissions
-        self.total_airtime = 0           # time spent on transmiting data
+        self.total_airtime = 0           # time spent on transmiting data (including failed transmissions)
+        self.succ_airtime = 0            # time spent on transmiting data (only successful transmissions)
 
         self.env.process(self.run())
 
@@ -207,7 +208,6 @@ class Gnb(object):
             else:
                 trans_time = MCOT * 1e3  # if gap in use = full MCOT to transmit data
                 transmission = Transmission(self.env.now, trans_time, 0)
-            self.total_airtime += trans_time
             log("{:.2f}:\t {} is now occupying the channel for the next {:.2f} (RS={:.2f})".format(self.env.now,
                                                                                                    self.id,
                                                                                                    transmission.end - transmission.start,
@@ -218,12 +218,14 @@ class Gnb(object):
                 self.cw = CW_MIN
                 log_success("{:.2f}:\t {} transmission was successful. Current CW={}".format(self.env.now, self.id, self.cw))
                 self.successful_trans += 1
-                self.total_trans += 1
+                self.succ_airtime += trans_time
             else:
                 if self.cw < CW_MAX:
                     self.cw = ((self.cw + 1) * 2) - 1
                 log_fail("{:.2f}:\t {} transmission resulted in a collision. Current CW={}".format(self.env.now, self.id, self.cw))
-                self.total_trans += 1
+
+            self.total_trans += 1
+            self.total_airtime += trans_time
 
 
 def run_simulation(sim_time, nr_of_gnbs, seed):
@@ -244,21 +246,27 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
                         'failed_transmissions': gnb.total_trans - gnb.successful_trans,
                         'total_transmissions': gnb.total_trans,
                         'collision_probability': 1 - gnb.successful_trans / gnb.total_trans if gnb.total_trans > 0 else None,
-                        'airtime': gnb.total_airtime})
+                        'airtime': gnb.total_airtime,
+                        'efficient_airtime': gnb.succ_airtime})
     return results
 
 
 if __name__ == "__main__":
+
+    SIM_TIME = 100
+
     total_t = 0
     fail_t = 0
     total_airtime = 0
+    efficient_airtime = 0
 
-    results = run_simulation(sim_time=100, nr_of_gnbs=2, seed=42)
+    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=42)
 
     for result in results:
         total_airtime += result['airtime']
         total_t += result['total_transmissions']
         fail_t += result['failed_transmissions']
+        efficient_airtime += result['efficient_airtime']
     for result in results:
         print("------------------------------------")
         print(result['gnb_id'])
@@ -270,3 +278,4 @@ if __name__ == "__main__":
 
     print('====================================')
     print('Total colission probablility: {:.4f}'.format(fail_t / total_t))
+    print('Total channel efficiency: {:.4f}'.format(efficient_airtime / (SIM_TIME*1e6)))
