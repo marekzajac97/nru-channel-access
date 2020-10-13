@@ -1,7 +1,7 @@
 import random
 import simpy
 
-DEBUG = False
+DEBUG = True
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
@@ -115,11 +115,11 @@ class Gnb(object):
         """Process responsible for keeping the next sync slot boundry timestamp"""
         desync = random.randint(0, MAX_SYNC_SLOT_DESYNC)
         self.next_sync_slot_boundry = desync
+        log("{:.2f}:\t {} selected random sync slot offset equal to {}".format(self.env.now, self.id, desync))
         yield self.env.timeout(desync)  # randomly desync tx starting points
-
         while True:
             self.next_sync_slot_boundry += SYNCHRONIZATION_SLOT_DURATION
-            log_fail("{:.2f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
+            # log_fail("{:.2f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
             yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
 
     def wait_for_idle_channel(self):
@@ -174,6 +174,8 @@ class Gnb(object):
 
     def wait_random_backoff(self):
         """Wait random number of slots N x OBSERVATION_SLOT_DURATION us"""
+        if self.channel.time_until_free() > 0:  # if channel is busy at the start of backoff (e.g. after gap period channel is busy) imidiately return
+            return
         sensing_proc = self.env.process(self.sense_channel(self.N))
         self.channel.sensing_processes.append(sensing_proc)
         self.N = yield sensing_proc
@@ -192,8 +194,6 @@ class Gnb(object):
                 log("{:.2f}:\t {} prioritization period has finnished".format(self.env.now, self.id))
                 if not RS_SIGNALS:  # if RS signals not used, use gap BEFORE backoff procedure
                     yield self.env.process(self.wait_gap_period())
-                    if self.channel.time_until_free() > 0:  # if channel was occupied during the gap period, do not start backoff
-                        continue
                 log("{:.2f}:\t {} starting backoff procedure".format(self.env.now, self.id))
                 yield self.env.process(self.wait_random_backoff())
                 if self.N == 0:
@@ -253,14 +253,14 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
 
 if __name__ == "__main__":
 
-    SIM_TIME = 100
+    SIM_TIME = 1
 
     total_t = 0
     fail_t = 0
     total_airtime = 0
     efficient_airtime = 0
 
-    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=42)
+    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=48)
 
     for result in results:
         total_airtime += result['airtime']
