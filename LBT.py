@@ -1,14 +1,14 @@
 import random
 import simpy
 
-DEBUG = False
+DEBUG = True
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
-RS_SIGNALS = True                    # if True use reservation signals before transmission. Use gap otherwise
-GAP_PERIOD = 'during'                 # insert backoff 'before', 'during','during' 'after', 'after_cca' backoff procedure.
+RS_SIGNALS = False                     # if True use reservation signals before transmission. Use gap otherwise
+GAP_PERIOD = 'before'                 # insert backoff 'before', 'during','during' 'after', 'after_cca' backoff procedure.
 
 # set of parameters only applicaple with GAP_PERIOD set to 'during'
 BACKOFF_SLOTS_SPLIT = 'variable'      # 'fixed' or 'variable'
@@ -143,7 +143,8 @@ class Gnb(object):
                 yield self.env.timeout(OBSERVATION_SLOT_DURATION)
                 slots_to_wait -= 1
         except simpy.Interrupt:
-            slots_to_wait -= 1  # simulate propagation delay
+            pass
+            # slots_to_wait -= 1  # simulate propagation delay
             # pass  # if the procedure was interrupted by the start of a new transmission retrun remaining slots
         return slots_to_wait
 
@@ -240,7 +241,6 @@ class Gnb(object):
 
             if RS_SIGNALS:
                 time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal
-                time_to_next_sync_slot = 0
                 trans_time = (MCOT * 1e3 - time_to_next_sync_slot)  # if RS in use = the rest of MCOT to transmit data
                 transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
             else:
@@ -257,7 +257,6 @@ class Gnb(object):
                 log_success("{:.0f}:\t {} transmission was successful. Current CW={}".format(self.env.now, self.id, self.cw))
                 self.successful_trans += 1
                 self.succ_airtime += trans_time
-                log(str(self.succ_airtime))
             else:
                 if self.cw < CW_MAX:
                     self.cw = ((self.cw + 1) * 2) - 1
@@ -292,14 +291,14 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
 
 if __name__ == "__main__":
 
-    SIM_TIME = 100
+    SIM_TIME = 0.1
 
     total_t = 0
     fail_t = 0
     total_airtime = 0
     efficient_airtime = 0
 
-    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=49)
+    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=48)
 
     for result in results:
         total_airtime += result['airtime']
