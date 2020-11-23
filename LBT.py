@@ -9,7 +9,9 @@ OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
 RS_SIGNALS = False                    # if True use reservation signals before transmission. Use gap otherwise
-GAP_PERIOD = 'during'                 # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
+GAP_PERIOD = 'before'                 # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
+
+BACKOFF_INSIDE = False                # wait backoff in the middle of the gap, set this on True only with GAP_PERIOD == 'before' !!!
 
 # set of parameters only applicaple with GAP_PERIOD set to 'during'
 BACKOFF_SLOTS_SPLIT = 'fixed'      # 'fixed' or 'variable'
@@ -179,7 +181,16 @@ class Gnb(object):
             gap_length += SYNCHRONIZATION_SLOT_DURATION  # check if possible to transsmit in the slot after the next slot and repeat
 
         log("{:.0f}:\t {} calculating and waiting the gap period ({:.0f} us)".format(self.env.now, self.id, gap_length))
-        yield self.env.timeout(gap_length)
+        if BACKOFF_INSIDE:
+            log("{:.0f}:\t {} waiting first half of the gap period ({:.0f} us)".format(self.env.now, self.id, gap_length / 2))
+            yield self.env.timeout(gap_length / 2)
+            log("{:.0f}:\t {} (re)starting backoff procedure in the middle of the gap (slots to wait: {})".format(self.env.now, self.id, self.N))
+            yield self.env.process(self.wait_random_backoff())
+            if self.N == 0:
+                log("{:.0f}:\t {} waiting second half of the gap period ({:.0f} us)".format(self.env.now, self.id, gap_length / 2))
+                yield self.env.timeout(gap_length / 2)
+        else:
+            yield self.env.timeout(gap_length)
 
     def wait_random_backoff(self):
         """Wait random number of slots N x OBSERVATION_SLOT_DURATION us"""
@@ -230,8 +241,9 @@ class Gnb(object):
                 log("{:.0f}:\t {} prioritization period has finished".format(self.env.now, self.id))
                 if not RS_SIGNALS and GAP_PERIOD == 'before':  # if RS signals not used, use gap BEFORE backoff procedure
                     yield self.env.process(self.wait_gap_period())
-                log("{:.0f}:\t {} (re)starting backoff procedure (slots to wait: {})".format(self.env.now, self.id, self.N))
-                yield self.env.process(self.wait_random_backoff())
+                if not BACKOFF_INSIDE:  # do not wait backoff as it was already waited inside gap
+                    log("{:.0f}:\t {} (re)starting backoff procedure (slots to wait: {})".format(self.env.now, self.id, self.N))
+                    yield self.env.process(self.wait_random_backoff())
                 if self.N == 0:
                     break
                 else:
@@ -241,6 +253,10 @@ class Gnb(object):
                 yield self.env.process(self.wait_gap_period())
             elif not RS_SIGNALS and GAP_PERIOD == 'after_cca':  # transmit after gap AND successful CCA
                 yield self.env.process(self.wait_gap_period())
+                if self.channel.time_until_free() > 0:
+                    log("{:.0f}:\t {} Channel BUSY after gap period, aborting transmission".format(self.env.now, self.id))
+                    continue
+            elif BACKOFF_INSIDE:
                 if self.channel.time_until_free() > 0:
                     log("{:.0f}:\t {} Channel BUSY after gap period, aborting transmission".format(self.env.now, self.id))
                     continue
