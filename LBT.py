@@ -1,18 +1,19 @@
 import random
 import simpy
+import math
 
-DEBUG = True
+DEBUG = False
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
-RS_SIGNALS = False                     # if True use reservation signals before transmission. Use gap otherwise
-GAP_PERIOD = 'before'                 # insert backoff 'before', 'during','during' 'after', 'after_cca' backoff procedure.
+RS_SIGNALS = False                    # if True use reservation signals before transmission. Use gap otherwise
+GAP_PERIOD = 'during'                 # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
 
 # set of parameters only applicaple with GAP_PERIOD set to 'during'
-BACKOFF_SLOTS_SPLIT = 'variable'      # 'fixed' or 'variable'
-BACKOFF_SLOTS_TO_LEAVE = 0.5          # how many slots from the backoff procedure leave to count after the gap. A fixed number of slots or percentage of backoff.
+BACKOFF_SLOTS_SPLIT = 'fixed'      # 'fixed' or 'variable'
+BACKOFF_SLOTS_TO_LEAVE = 7          # how many slots from the backoff procedure leave to count after the gap. A fixed number of slots or percentage of backoff.
 
 # Channel access class 1
 # M = 1                               # fixed number of observation slots in prioritization period
@@ -187,30 +188,35 @@ class Gnb(object):
 
         if not RS_SIGNALS and GAP_PERIOD == 'during':
             if BACKOFF_SLOTS_SPLIT == 'fixed':
-                backoff_slots_to_left = BACKOFF_SLOTS_TO_LEAVE
+                backoff_slots_left = BACKOFF_SLOTS_TO_LEAVE
             elif BACKOFF_SLOTS_SPLIT == 'variable':
-                backoff_slots_to_left = round(BACKOFF_SLOTS_TO_LEAVE * self.N)
+                backoff_slots_left = int(math.ceil(BACKOFF_SLOTS_TO_LEAVE * self.N))
 
-            slots_to_wait = self.N - backoff_slots_to_left
-            slots_to_wait = slots_to_wait if slots_to_wait >= 0 else 0
+            slots_to_wait = self.N - backoff_slots_left
+            slots_to_wait = slots_to_wait if slots_to_wait >= 0 else 0  # if backoff is longer than BACKOFF_SLOTS_TO_LEAVE, count these slots after gap
+            log("{:.0f}:\t {} will wait {} slots before stopping backoff".format(self.env.now, self.id, slots_to_wait))
         else:
             slots_to_wait = self.N
-        sensing_proc = self.env.process(self.sense_channel(self.N))
+        sensing_proc = self.env.process(self.sense_channel(slots_to_wait))
         self.channel.sensing_processes.append(sensing_proc)
-        self.N = yield sensing_proc
+        remaining_slots = yield sensing_proc
         self.channel.sensing_processes.remove(sensing_proc)
 
-        if not RS_SIGNALS and GAP_PERIOD == 'during':  # redo backoff for additional backoff_slots_to_left
+        if not RS_SIGNALS and GAP_PERIOD == 'during' and remaining_slots == 0:  # redo backoff for additional backoff_slots_left
             log("{:.0f}:\t {} stopping backoff and inserting gap now".format(self.env.now, self.id))
-            self.N += backoff_slots_to_left
             yield self.env.process(self.wait_gap_period())
-            if self.channel.time_until_free() > 0:
+            log("{:.0f}:\t {} waiting remaining backoff slots ({}) after gap".format(self.env.now, self.id, self.N - slots_to_wait))
+            if self.channel.time_until_free() > 0:  # cca at the beggining of the backoff
+                self.N = self.N - slots_to_wait
                 return
-            log("{:.0f}:\t {} waiting remaining backoff slots ({}) after gap".format(self.env.now, self.id, backoff_slots_to_left))
-            sensing_proc = self.env.process(self.sense_channel(self.N))
+            sensing_proc = self.env.process(self.sense_channel(self.N - slots_to_wait))
             self.channel.sensing_processes.append(sensing_proc)
             self.N = yield sensing_proc
             self.channel.sensing_processes.remove(sensing_proc)
+        elif not RS_SIGNALS and GAP_PERIOD == 'during' and remaining_slots > 0:
+            self.N = remaining_slots + self.N - slots_to_wait
+        else:
+            self.N = remaining_slots
 
     def run(self):
         """Main process. Genrate new transmission, wait for channel to become idle and begin transmission"""
@@ -291,14 +297,14 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
 
 if __name__ == "__main__":
 
-    SIM_TIME = 0.1
+    SIM_TIME = 100
 
     total_t = 0
     fail_t = 0
     total_airtime = 0
     efficient_airtime = 0
 
-    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=48)
+    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=10, seed=4)
 
     for result in results:
         total_airtime += result['airtime']
@@ -322,7 +328,7 @@ if __name__ == "__main__":
     sum_sq = 0
     n = len(results)
     for result in results:
-        sum_sq += result['airtime']**2
+        sum_sq += result['efficient_airtime']**2
 
-    jain_index = total_airtime**2 / (n * sum_sq)
+    jain_index = efficient_airtime**2 / (n * sum_sq)
     print("Jain's fairnes index: {:.4f}".format(jain_index))
