@@ -2,20 +2,20 @@ import random
 import simpy
 import math
 
-DEBUG = False
+DEBUG = True
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
 RS_SIGNALS = False                    # if True use reservation signals before transmission. Use gap otherwise
-GAP_PERIOD = 'before'                 # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
+GAP_PERIOD = 'after_cca'              # insert gap 'before', 'during', 'after', 'after_cca' backoff procedure.
 
 BACKOFF_INSIDE = False                # wait backoff in the middle of the gap, set this on True only with GAP_PERIOD == 'before' !!!
 
 # set of parameters only applicaple with GAP_PERIOD set to 'during'
-BACKOFF_SLOTS_SPLIT = 'fixed'      # 'fixed' or 'variable'
-BACKOFF_SLOTS_TO_LEAVE = 7          # how many slots from the backoff procedure leave to count after the gap. A fixed number of slots or percentage of backoff.
+BACKOFF_SLOTS_SPLIT = 'variable'      # 'fixed' or 'variable'
+BACKOFF_SLOTS_TO_LEAVE = 0.5          # how many slots from the backoff procedure leave to count after the gap. A fixed number of slots or percentage of backoff.
 
 # Channel access class 1
 # M = 1                               # fixed number of observation slots in prioritization period
@@ -116,6 +116,8 @@ class Gnb(object):
         self.total_trans = 0             # total number of transmissions
         self.total_airtime = 0           # time spent on transmiting data (including failed transmissions)
         self.succ_airtime = 0            # time spent on transmiting data (only successful transmissions)
+
+        self.was_busy = False
 
         self.env.process(self.sync_slot_counter())
         self.env.process(self.run())
@@ -234,8 +236,13 @@ class Gnb(object):
         while True:
             log("{:.0f}:\t {} begins new transmission procedure".format(self.env.now, self.id))
 
-            self.N = random.randint(0, self.cw)  # draw a random backoff
-            log("{:.0f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
+            if self.was_busy:  # if procedure failed because the channel was busy continue with backoff = 0
+                self.N = 0
+                self.was_busy = False  # reset flag
+            else:
+                self.N = random.randint(0, self.cw)  # draw a random backoff
+                log("{:.0f}:\t {} gNB has drawn a random backoff counter = {}".format(self.env.now, self.id, self.N))
+
             while True:
                 yield self.env.process(self.wait_prioritization_period())
                 log("{:.0f}:\t {} prioritization period has finished".format(self.env.now, self.id))
@@ -254,7 +261,9 @@ class Gnb(object):
             elif not RS_SIGNALS and GAP_PERIOD == 'after_cca':  # transmit after gap AND successful CCA
                 yield self.env.process(self.wait_gap_period())
                 if self.channel.time_until_free() > 0:
+                    log("{:.0f}:\t {} ---------------------------------------------------------------------------------------------------------------------".format(self.env.now, self.id))
                     log("{:.0f}:\t {} Channel BUSY after gap period, aborting transmission".format(self.env.now, self.id))
+                    self.was_busy = True
                     continue
             elif BACKOFF_INSIDE:
                 if self.channel.time_until_free() > 0:
@@ -313,14 +322,14 @@ def run_simulation(sim_time, nr_of_gnbs, seed):
 
 if __name__ == "__main__":
 
-    SIM_TIME = 100
+    SIM_TIME = 0.1
 
     total_t = 0
     fail_t = 0
     total_airtime = 0
     efficient_airtime = 0
 
-    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=10, seed=4)
+    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=4, seed=4)
 
     for result in results:
         total_airtime += result['airtime']
