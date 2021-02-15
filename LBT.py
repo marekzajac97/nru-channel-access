@@ -10,10 +10,11 @@ DETER_PERIOD = 16                     # Time which a node is required to wait at
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
-MIN_SYNC_SLOT_DESYNC = 0              # same as above but minimum between other stations
+MIN_SYNC_SLOT_DESYNC = 60              # same as above but minimum between other stations
 RS_SIGNALS = False                    # if True use reservation signals before transmission. Use gap otherwise
-GAP_PERIOD = 'before'              # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
-PARTIAL_ENDING_SUBFRAMES = False       # make last slot duration random between 1 and 14 OFDM slots
+GAP_PERIOD = 'after_cca'              # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
+PARTIAL_ENDING_SUBFRAMES = True       # make last slot duration random between 1 and 14 OFDM slots
+SKIP_NEXT_SLOT_BOUNDRY = True
 
 BACKOFF_INSIDE = False                # wait backoff in the middle of the gap, set this on True only with GAP_PERIOD == 'before' !!!
 
@@ -46,8 +47,8 @@ MCOT = 8
 # MCOT = 8
 
 # no backoff
-# CW_MIN = 0
-# CW_MAX = 0
+CW_MIN = 0
+CW_MAX = 0
 
 
 def log(output):
@@ -141,6 +142,7 @@ class Gnb(object):
         self.total_airtime = 0           # time spent on transmiting data (including failed transmissions)
         self.succ_airtime = 0            # time spent on transmiting data (only successful transmissions)
         self.desync = desync
+        self.skip = None
 
         self.env.process(self.sync_slot_counter())
         self.env.process(self.run())
@@ -288,6 +290,12 @@ class Gnb(object):
                     log("{:.0f}:\t {} Channel BUSY after gap period, aborting transmission".format(self.env.now, self.id))
                     continue
 
+            if SKIP_NEXT_SLOT_BOUNDRY and self.skip == self.env.now:
+                self.skip = None
+                log("{:.0f}:\t {} SKIPPING SLOT (will restart transmission procedure after {:.0f} us)".format(self.env.now, self.id, SYNCHRONIZATION_SLOT_DURATION))
+                yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
+                continue
+
             if PARTIAL_ENDING_SUBFRAMES:
                 last_slot = random.randint(1, 14)
                 trans_time = (MCOT * 1e3 - SYNCHRONIZATION_SLOT_DURATION) + (SYNCHRONIZATION_SLOT_DURATION/14) * last_slot
@@ -299,6 +307,7 @@ class Gnb(object):
                 transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
             else:
                 transmission = Transmission(self.env.now, trans_time, 0)
+
             log("{:.0f}:\t {} is now occupying the channel for the next {:.0f} us (RS={:.0f} us)".format(self.env.now,
                                                                                                          self.id,
                                                                                                          transmission.end - transmission.start,
@@ -310,6 +319,8 @@ class Gnb(object):
                 log_success("{:.0f}:\t {} transmission was successful. Current CW={}".format(self.env.now, self.id, self.cw))
                 self.successful_trans += 1
                 self.succ_airtime += trans_time
+                if SKIP_NEXT_SLOT_BOUNDRY:
+                    self.skip = self.next_sync_slot_boundry
             else:
                 if self.cw < CW_MAX:
                     self.cw = ((self.cw + 1) * 2) - 1
@@ -360,7 +371,7 @@ if __name__ == "__main__":
     total_airtime = 0
     efficient_airtime = 0
 
-    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=10, seed=4)
+    results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=2, seed=4)
 
     for result in results:
         total_airtime += result['airtime']
