@@ -1,15 +1,19 @@
 import random
 import simpy
 import math
+import numpy as np
 
 DEBUG = False
+gnbs = None
 
 DETER_PERIOD = 16                     # Time which a node is required to wait at the start of prioritization period in microseconds
 OBSERVATION_SLOT_DURATION = 9         # observation slot length in microseconds
 SYNCHRONIZATION_SLOT_DURATION = 1000  # synchronization slot length in microseconds
 MAX_SYNC_SLOT_DESYNC = 1000           # max random delay between sync slots of each gNB in microseconds (0 to make all gNBs synced)
+MIN_SYNC_SLOT_DESYNC = 0              # same as above but minimum between other stations
 RS_SIGNALS = False                    # if True use reservation signals before transmission. Use gap otherwise
-GAP_PERIOD = 'before'                 # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
+GAP_PERIOD = 'before'              # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
+PARTIAL_ENDING_SUBFRAMES = False       # make last slot duration random between 1 and 14 OFDM slots
 
 BACKOFF_INSIDE = False                # wait backoff in the middle of the gap, set this on True only with GAP_PERIOD == 'before' !!!
 
@@ -41,6 +45,10 @@ MCOT = 8
 # CW_MAX = 1023
 # MCOT = 8
 
+# no backoff
+# CW_MIN = 0
+# CW_MAX = 0
+
 
 def log(output):
     if DEBUG:
@@ -58,6 +66,22 @@ def log_fail(output):
 def log_success(output):
     if DEBUG:
         print("\033[92m" + output + "\033[0m")
+
+
+def ranks(sample):
+    """
+    Return the ranks of each element in an integer sample.
+    """
+    indices = sorted(range(len(sample)), key=lambda i: sample[i])
+    return sorted(indices, key=lambda i: indices[i])
+
+
+def sample_with_min_distance(n, k, d):
+    """
+    Sample of k elements from range(n), with a minimum distance d.
+    """
+    sample = random.sample(range(n-(k-1)*(d-1)), k)
+    return [s + (d-1)*r for s, r in zip(sample, ranks(sample))]
 
 
 class Transmission(object):
@@ -105,7 +129,7 @@ class Channel(object):
 
 
 class Gnb(object):
-    def __init__(self, env, id, channel):
+    def __init__(self, env, id, channel, desync):
         self.env = env
         self.channel = channel
         self.id = id
@@ -116,19 +140,22 @@ class Gnb(object):
         self.total_trans = 0             # total number of transmissions
         self.total_airtime = 0           # time spent on transmiting data (including failed transmissions)
         self.succ_airtime = 0            # time spent on transmiting data (only successful transmissions)
+        self.desync = desync
 
         self.env.process(self.sync_slot_counter())
         self.env.process(self.run())
 
     def sync_slot_counter(self):
         """Process responsible for keeping the next sync slot boundry timestamp"""
-        desync = random.randint(0, MAX_SYNC_SLOT_DESYNC)
-        self.next_sync_slot_boundry = desync
-        log("{:.0f}:\t {} selected random sync slot offset equal to {} us".format(self.env.now, self.id, desync))
-        yield self.env.timeout(desync)  # randomly desync tx starting points
+        # desync = 100*int(self.id[-1])
+        # self.desync = random.randint(0, MAX_SYNC_SLOT_DESYNC)
+        self.next_sync_slot_boundry = self.desync
+        log("{:.0f}:\t {} selected random sync slot offset equal to {} us".format(self.env.now, self.id, self.desync))
+        yield self.env.timeout(self.desync)  # randomly desync tx starting points
         while True:
             self.next_sync_slot_boundry += SYNCHRONIZATION_SLOT_DURATION
-            # log_fail("{:.0f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
+            # if 'gNB 0' in self.id:
+            #     log_fail("{:.0f}:\t {} SYNC SLOT BOUNDRY NOW".format(self.env.now, self.id))
             yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
 
     def wait_for_idle_channel(self):
@@ -261,12 +288,16 @@ class Gnb(object):
                     log("{:.0f}:\t {} Channel BUSY after gap period, aborting transmission".format(self.env.now, self.id))
                     continue
 
-            if RS_SIGNALS:
-                time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal
-                trans_time = (MCOT * 1e3 - time_to_next_sync_slot)  # if RS in use = the rest of MCOT to transmit data
-                transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
+            if PARTIAL_ENDING_SUBFRAMES:
+                last_slot = random.randint(1, 14)
+                trans_time = (MCOT * 1e3 - SYNCHRONIZATION_SLOT_DURATION) + (SYNCHRONIZATION_SLOT_DURATION/14) * last_slot
             else:
                 trans_time = MCOT * 1e3  # if gap in use = full MCOT to transmit data
+            if RS_SIGNALS:
+                time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal
+                trans_time = (trans_time - time_to_next_sync_slot)  # if RS in use = the rest of MCOT to transmit data
+                transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
+            else:
                 transmission = Transmission(self.env.now, trans_time, 0)
             log("{:.0f}:\t {} is now occupying the channel for the next {:.0f} us (RS={:.0f} us)".format(self.env.now,
                                                                                                          self.id,
@@ -288,13 +319,22 @@ class Gnb(object):
             self.total_airtime += trans_time
 
 
-def run_simulation(sim_time, nr_of_gnbs, seed):
+def run_simulation(sim_time, nr_of_gnbs, seed, desyncs=None):
     """Run simulation. Return a list with results."""
     random.seed(seed)
 
     env = simpy.Environment()
     channel = Channel(env)
-    gnbs = [Gnb(env, 'gNB {}'.format(i), channel) for i in range(nr_of_gnbs)]
+
+    if desyncs is None:
+        # ## random desync offsets, but every value is at least MIN_SYNC_SLOT_DESYNC as far from any other value
+        desyncs = sample_with_min_distance(MAX_SYNC_SLOT_DESYNC - MIN_SYNC_SLOT_DESYNC, nr_of_gnbs, MIN_SYNC_SLOT_DESYNC)
+        # ## random offset from a set (set contains values with step of MIN_SYNC_SLOT_DESYNC)
+        # desync_set = list(np.linspace(0, MAX_SYNC_SLOT_DESYNC, num=int(MAX_SYNC_SLOT_DESYNC/MIN_SYNC_SLOT_DESYNC)+1))[:-1]
+        # desyncs = [random.choice(desync_set) for _ in range(0, nr_of_gnbs)]
+        print(desyncs)
+
+    gnbs = [Gnb(env, 'gNB {}'.format(i), channel, desyncs[i]) for i in range(nr_of_gnbs)]
 
     env.run(until=(sim_time*1e6))
 
