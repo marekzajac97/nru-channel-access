@@ -190,7 +190,7 @@ class Gnb(object):
             m = yield sensing_proc
             self.channel.sensing_processes.remove(sensing_proc)
             if m != 0:
-                self.log("Channel BUSY - prioritezation period failed.")
+                self.log("Channel BUSY - prioritization period failed.")
 
     def wait_gap_period(self):
         """Wait gap period"""
@@ -386,7 +386,7 @@ def process_resutls(results, sim_time, seed, nr_of_gnbs):
     ret['pc'] = fail_total / trans_total
     ret['occ'] = occupancy_total
     ret['eff'] = efficient_airtime / (sim_time*1e6)
-    # calculate Jain's fairnes index
+    # calculate Jain's fairness index
     sum_sq = 0
     n = len(results)
     for result in results:
@@ -422,15 +422,15 @@ if __name__ == "__main__":
     for result in results:
         print("------------------------------------")
         print(result['id'])
-        print('Collsions: {}/{} ({}%)'.format(result['fail'],
+        print('Collisions: {}/{} ({}%)'.format(result['fail'],
                                               result['trans'],
                                               result['pc'] * 100 if result['pc'] is not None else 'N/A'))
-        print('Total channel occupancy time: {} ms'.format(result['occ'] / 1e3))
-        print('Normalized channel occupancy time: {:.2f}'.format(result['occ'] / processed['occ']))
+        print('Total airtime: {} ms'.format(result['occ'] / 1e3))
+        print('Channel efficiency: {:.2f}'.format(result['occ'] / processed['occ']))
 
     print('====================================')
     print('Total colission probablility: {:.4f}'.format(processed['pc']))
     print('Total channel efficiency: {:.4f}'.format(processed['eff']))
-    print("Jain's fairnes index: {:.4f}".format(processed['jfi']))
+    print("Jain's fairness index: {:.4f}".format(processed['jfi']))
     print('====================================')
-    print("--- Simulation run for %s seconds ---" % (end_time - start_time))
+    print("--- Simulation ran for %s seconds ---" % (end_time - start_time))
