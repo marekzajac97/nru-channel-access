@@ -429,7 +429,7 @@ if __name__ == "__main__":
         print('Channel efficiency: {:.2f}'.format(result['occ'] / processed['occ']))
 
     print('====================================')
-    print('Total colission probablility: {:.4f}'.format(processed['pc']))
+    print('Total collision probability: {:.4f}'.format(processed['pc']))
     print('Total channel efficiency: {:.4f}'.format(processed['eff']))
     print("Jain's fairness index: {:.4f}".format(processed['jfi']))
     print('====================================')
