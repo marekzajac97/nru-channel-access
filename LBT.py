@@ -25,7 +25,7 @@ MIN_SYNC_SLOT_DESYNC = 0              # same as above but minimum between other 
 RS_SIGNALS = False                    # if True use reservation signals before transmission. Use gap otherwise
 GAP_PERIOD = Gap.AFTER_WITH_CCA               # insert backoff 'before', 'during', 'after', 'after_cca' backoff procedure.
 PARTIAL_ENDING_SUBFRAMES = False      # make last slot duration random between 1 and 14 OFDM slots
-SKIP_NEXT_SLOT_BOUNDRY = False
+SKIP_NEXT_SLOT_BOUNDARY = False
 SKIP_NEXT_TXOP = False
 
 CCA_TX_SWITCH_TIME = 0
@@ -119,7 +119,7 @@ class Gnb(object):
         self.id = id
         self.cw = CW_MIN                 # current contention window size
         self.N = None                    # backoff counter
-        self.next_sync_slot_boundry = 0  # nex synchronization slot boundry
+        self.next_sync_slot_boundary = 0  # nex synchronization slot boundary
         self.successful_trans = 0        # number of successful transmissions
         self.total_trans = 0             # total number of transmissions
         self.total_airtime = 0           # time spent on transmiting data (including failed transmissions)
@@ -145,12 +145,12 @@ class Gnb(object):
                 print(self._log(output))     
 
     def sync_slot_counter(self):
-        """Process responsible for keeping the next sync slot boundry timestamp"""
-        self.next_sync_slot_boundry = self.desync
+        """Process responsible for keeping the next sync slot boundary timestamp"""
+        self.next_sync_slot_boundary = self.desync
         self.log("selected random sync slot offset equal to {} us".format(self.desync))
         yield self.env.timeout(self.desync)  # randomly desync tx starting points
         while True:
-            self.next_sync_slot_boundry += SYNCHRONIZATION_SLOT_DURATION
+            self.next_sync_slot_boundary += SYNCHRONIZATION_SLOT_DURATION
             yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
 
     def wait_for_idle_channel(self):
@@ -195,7 +195,7 @@ class Gnb(object):
     def wait_gap_period(self):
         """Wait gap period"""
         backoff_time = self.N * OBSERVATION_SLOT_DURATION  # time that will be taken for backoff
-        time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for gap
+        time_to_next_sync_slot = self.next_sync_slot_boundary - self.env.now  # calculate time needed for gap
 
         gap_length = time_to_next_sync_slot - backoff_time
         while gap_length < 0:  # less than 0 means it's impossible to transmit in the next slot because backoff is too long
@@ -282,7 +282,7 @@ class Gnb(object):
                     self.log("Channel BUSY after gap period, aborting transmission")
                     continue
 
-            if (SKIP_NEXT_SLOT_BOUNDRY and self.skip == self.env.now) or (SKIP_NEXT_TXOP and self.skip):
+            if (SKIP_NEXT_SLOT_BOUNDARY and self.skip == self.env.now) or (SKIP_NEXT_TXOP and self.skip):
                 self.skip = None
                 self.log("SKIPPING SLOT (will restart transmission procedure after {:.0f} us)".format(SYNCHRONIZATION_SLOT_DURATION))
                 yield self.env.timeout(SYNCHRONIZATION_SLOT_DURATION)
@@ -294,7 +294,7 @@ class Gnb(object):
             else:
                 trans_time = MCOT * 1e3  # if gap in use = full MCOT to transmit data
             if RS_SIGNALS:
-                time_to_next_sync_slot = self.next_sync_slot_boundry - self.env.now  # calculate time needed for reservation signal
+                time_to_next_sync_slot = self.next_sync_slot_boundary - self.env.now  # calculate time needed for reservation signal
                 trans_time = (trans_time - time_to_next_sync_slot)  # if RS in use = the rest of MCOT to transmit data
                 transmission = Transmission(self.env.now, trans_time, time_to_next_sync_slot)
             else:
@@ -309,8 +309,8 @@ class Gnb(object):
                 self.log("transmission was successful. Current CW={}".format(self.cw), success=True)
                 self.successful_trans += 1
                 self.succ_airtime += trans_time
-                if SKIP_NEXT_SLOT_BOUNDRY or SKIP_NEXT_TXOP:
-                    self.skip = self.next_sync_slot_boundry
+                if SKIP_NEXT_SLOT_BOUNDARY or SKIP_NEXT_TXOP:
+                    self.skip = self.next_sync_slot_boundary
             else:
                 if self.cw < CW_MAX:
                     self.cw = ((self.cw + 1) * 2) - 1
