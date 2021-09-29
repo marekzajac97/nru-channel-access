@@ -1,3 +1,0 @@
-fail,succ,trans,pc,occ,eff,jfi,sim_time,seed,N_sta,rs,gap,cw_min,cw_max,sync,partial,mcot
-0,12156,12156,0.0,97248000.0,0.97248,0.6679436677169521,100,42,10,False,Gap.AFTER_WITH_CCA,15,63,1000,False,8
-0,12156,12156,0.0,97248000.0,0.97248,0.6679436677169521,100,42,10,False,Gap.AFTER_WITH_CCA,15,63,1000,False,8
