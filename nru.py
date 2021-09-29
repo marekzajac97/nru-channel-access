@@ -366,7 +366,7 @@ def dump_csv(parameters, results, filename=None):
         writer.writerow(results)
 
 
-def process_resutls(results, sim_time, seed, nr_of_gnbs):
+def process_results(results, sim_time, seed, nr_of_gnbs):
     occupancy_total = 0
     trans_total = 0
     fail_total = 0
@@ -416,7 +416,7 @@ if __name__ == "__main__":
     start_time = time.time()
     results = run_simulation(sim_time=SIM_TIME, nr_of_gnbs=NR_OF_GNBS, seed=SEED)
     end_time = time.time()
-    processed = process_resutls(results, SIM_TIME, SEED, NR_OF_GNBS)
+    processed = process_results(results, SIM_TIME, SEED, NR_OF_GNBS)
 
 
     for result in results:
