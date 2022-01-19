@@ -29,5 +29,5 @@ NR_OF_GNBS = 10  # number of transmitting gNBs
 
 The simulator was used to conduct the research presented in the following papers:
 
-- M. Zając, S. Szott, "Resolving 5G NR-U Contention for Gap-based Channel Access in Shared Sub-6 GHz Bands" (in preparation), 2021.
+- M. Zając and S. Szott, "[Resolving 5G NR-U Contention for Gap-Based Channel Access in Shared Sub-7 GHz Bands](https://ieeexplore.ieee.org/abstract/document/9673740)," in IEEE Access, vol. 10, pp. 4031-4047, 2022, doi: 10.1109/ACCESS.2022.3141193.
 
